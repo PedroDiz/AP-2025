@@ -18,152 +18,117 @@ In a production setting, our pipeline downloads data programmatically
 #drive.mount('/content/drive')
 
 # Standard library
-import os
 import time
-import random
-import zipfile
 
 # Data handling
 import requests
 import pandas as pd
-import numpy as np
 from PIL import Image
-from tqdm import tqdm
 
 # PyTorch & vision
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-import timm
 import torchvision.transforms as transforms
+from torch.utils.data import Dataset
 
 # Scikit-learn metrics & utilities
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import (
-    roc_auc_score, roc_curve, f1_score,
-    balanced_accuracy_score,
-    precision_recall_fscore_support,
-    classification_report
-)
-
-# Plotting
-import matplotlib.pyplot as plt
-
-"""## Stage 1: Data Acquisition & Exploration
-- Download raw images and metadata from the ISIC API  
-- Inspect dataset structure and class distribution
-
-Load the dataset ISIC(collection 66, representative of the training set of task 3) into the *results* variable, ~11k entries
-"""
-
-base_url = "https://api.isic-archive.com/api/v2/images/search/"
-params = {
-    "collections": "66,67,73"
-}
-
-all_ids = []
-results = []
-
-page = 1
-start = time.time()
-
-while True:
-    response = requests.get(base_url, params=params)
-    data = response.json()
-
-    # Extract image IDs
-    for result in data.get("results", []):
-        all_ids.append(result["isic_id"])
-        results.append(result)
-
-    # Next page
-    next_cursor = data.get("next")
-    if not next_cursor:
-        break
-
-    # Update URL for the next request
-    base_url = next_cursor
-    params = {}
-    page += 1
-
-elapsed = time.time() - start
-print(f"Total images collected: {len(all_ids)}")
-print(f"Took {elapsed:.1f} seconds")
-
-"""Inspecting a single record to understand its structure and contents"""
-
-results[5]
-
-"""**We will confirm if every image is in the expected size (600x450)**"""
-
-# Verify that all images are 600×450 pixels(Expected size)
-mismatch_count = 0
-
-for entry in results:
-    try:
-        x = entry["metadata"]["acquisition"]["pixels_x"]
-        y = entry["metadata"]["acquisition"]["pixels_y"]
-        if (x, y) != (600, 450):
-            print(f"Image {entry['isic_id']} has size {x}×{y}, expected 600×450")
-            mismatch_count += 1
-    except KeyError:
-        print(f"Image {entry.get('isic_id', 'UNKNOWN')} is missing pixel metadata.")
-        mismatch_count += 1
-
-if mismatch_count == 0:
-    print("All images are confirmed to be 600×450 pixels.")
-else:
-    print(f"Found {mismatch_count} image(s) with unexpected dimensions or missing data.")
-
-"""Download the photos into ISIC_IMAGES_TASK_3 folder"""
 
 import os
 import zipfile
 import urllib.request
-import time
+from torch.utils.data import DataLoader
 
-# Start timing
-total_start = time.time()
 
-# Target folder
-PATH = "ISIC_IMAGES_TASK_3"
-os.makedirs(PATH, exist_ok=True)
 
-# Base URL for raw GitHub content
-base_url = "https://github.com/PedroDiz/AP-2025/raw/main/"
 
-# List of ZIP file names
-zip_files = [
-    "ISIC_IMAGES_TASK_3_PART_1.zip",
-    "ISIC_IMAGES_TASK_3_PART_2.zip",
-    "ISIC_IMAGES_TASK_3_PART_3.zip"
-]
+def fetch_isic_metadata(collections="66,67,73"):
+    base_url = "https://api.isic-archive.com/api/v2/images/search/"
+    params = {"collections": collections}
 
-# Download and extract each ZIP file
-for zip_file in zip_files:
+    all_ids = []
+    results = []
+    page = 1
     start = time.time()
 
-    zip_path = os.path.join(os.getcwd(), zip_file)
-    url = base_url + zip_file
+    while True:
+        response = requests.get(base_url, params=params)
+        data = response.json()
 
-    # Download if not already present
-    if not os.path.exists(zip_path):
-        print(f"Downloading {zip_file}...")
-        urllib.request.urlretrieve(url, zip_path)
-        print(f"Downloaded {zip_file} in {time.time() - start:.1f} seconds")
+        for result in data.get("results", []):
+            all_ids.append(result["isic_id"])
+            results.append(result)
+
+        next_cursor = data.get("next")
+        if not next_cursor:
+            break
+
+        base_url = next_cursor  # update URL for next page
+        params = {}
+        page += 1
+
+    elapsed = time.time() - start
+    print(f"Total images collected: {len(all_ids)}")
+    print(f"Took {elapsed:.1f} seconds")
+
+    return results, all_ids
+
+
+"""**We will confirm if every image is in the expected size (600x450)**"""
+
+
+def verify_image_dimensions(results, expected_size=(600, 450)):
+    mismatch_count = 0
+    expected_x, expected_y = expected_size
+
+    for entry in results:
+        try:
+            x = entry["metadata"]["acquisition"]["pixels_x"]
+            y = entry["metadata"]["acquisition"]["pixels_y"]
+            if (x, y) != (expected_x, expected_y):
+                print(f"Image {entry['isic_id']} has size {x}×{y}, expected {expected_x}×{expected_y}")
+                mismatch_count += 1
+        except KeyError:
+            print(f"Image {entry.get('isic_id', 'UNKNOWN')} is missing pixel metadata.")
+            mismatch_count += 1
+
+    if mismatch_count == 0:
+        print("All images are confirmed to be 600×450 pixels.")
     else:
-        print(f"{zip_file} already exists, skipping download")
+        print(f"Found {mismatch_count} image(s) with unexpected dimensions or missing data.")
 
-    # Extract into PATH
-    print(f"Extracting {zip_file}...")
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(PATH)
-    print(f"Extracted {zip_file} in {time.time() - start:.1f} seconds")
+    return mismatch_count
 
-# Total elapsed time
-total_elapsed = time.time() - total_start
-print(f"\nTotal time: {total_elapsed:.1f} seconds")
+"""Download the photos into ISIC_IMAGES_TASK_3 folder"""
+
+def download_and_extract_images(
+    zip_files,
+    base_url,
+    extract_to="ISIC_IMAGES_TASK_3"
+):
+    total_start = time.time()
+
+    os.makedirs(extract_to, exist_ok=True)
+
+    for zip_file in zip_files:
+        start = time.time()
+        zip_path = os.path.join(os.getcwd(), zip_file)
+        url = base_url + zip_file
+
+        if not os.path.exists(zip_path):
+            print(f"Downloading {zip_file}...")
+            urllib.request.urlretrieve(url, zip_path)
+            print(f"Downloaded {zip_file} in {time.time() - start:.1f} seconds")
+        else:
+            print(f"{zip_file} already exists, skipping download")
+
+        print(f"Extracting {zip_file}...")
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_to)
+        print(f"Extracted {zip_file} in {time.time() - start:.1f} seconds")
+
+    total_elapsed = time.time() - total_start
+    print(f"\nTotal time: {total_elapsed:.1f} seconds")
+
 
 """
 **Determine how each image is labeled as benign or malignant.**
@@ -171,45 +136,48 @@ print(f"\nTotal time: {total_elapsed:.1f} seconds")
 We’ll use the `benign_malignant` field for this purpose and first verify that every dataset entry includes this label.
 """
 
-# List unique values for 'benign_malignant' and count missing entries
-unique_vals = set()
-missing_count = 0
+def inspect_benign_malignant_labels(results):
+    unique_vals = set()
+    missing_count = 0
 
-for entry in results:
-    clinical = entry.get("metadata", {}).get("clinical", {})
-    val = clinical.get("benign_malignant", None)
-    if val is None:
-        missing_count += 1
+    for entry in results:
+        clinical = entry.get("metadata", {}).get("clinical", {})
+        val = clinical.get("benign_malignant", None)
+        if val is None:
+            missing_count += 1
+        else:
+            unique_vals.add(val)
+
+    if unique_vals:
+        print(f"Unique 'benign_malignant' values: {', '.join(sorted(unique_vals))}")
     else:
-        unique_vals.add(val)
+        print("No entries possess the 'benign_malignant' parameter.")
 
-# Print the unique labels found
-if unique_vals:
-    print(f"Unique 'benign_malignant' values: {', '.join(sorted(unique_vals))}")
-else:
-    print("No entries possess the 'benign_malignant' parameter.")
+    if missing_count > 0:
+        print(f"{missing_count} entries do not possess the 'benign_malignant' parameter.")
 
-# Report how many are missing
-if missing_count > 0:
-    print(f"{missing_count} entries do not possess the 'benign_malignant' parameter.")
+    return unique_vals, missing_count
+
 
 """**Summary:** A number of records are missing the `benign_malignant` attribute, so we must select an alternative field. The `diagnosis_1` attribute appears suitable for this task; next, we will examine its possible values.
 
 """
 
-missing_diagnosis_1_values = set()
+def get_diagnosis1_for_missing_benign_malignant(results):
+    missing_diagnosis_1_values = set()
 
-for entry in results:
-    clinical = entry.get("metadata", {}).get("clinical", {})
+    for entry in results:
+        clinical = entry.get("metadata", {}).get("clinical", {})
+        if "benign_malignant" not in clinical:
+            diag1 = clinical.get("diagnosis_1")
+            if diag1:
+                missing_diagnosis_1_values.add(diag1)
 
-    if "benign_malignant" not in clinical:
-        diag1 = clinical.get("diagnosis_1")
-        if diag1:
-            missing_diagnosis_1_values.add(diag1)
+    print("Unique 'diagnosis_1' values for entries missing 'benign_malignant':")
+    for value in sorted(missing_diagnosis_1_values):
+        print("-", value)
 
-print(" Unique 'diagnosis_1' values for entries missing 'benign_malignant':")
-for value in sorted(missing_diagnosis_1_values):
-    print("-", value)
+    return missing_diagnosis_1_values
 
 """**Conclusion:** For records lacking the `benign_malignant` attribute, we will use `diagnosis_1`, which also indicates lesion pathology. Entries where `diagnosis_1` equals “Indeterminate” will be excluded, as they do not provide definitive diagnostic information.
 
@@ -222,44 +190,47 @@ We will construct `lesions.csv` with the following columns:
   - `1` for records where `benign_malignant == "malignant"`
 """
 
-rows = []
-start = time.time()
-for result in results:
-    try:
-        isic_id = result["isic_id"]
-        filename = f"{isic_id}.jpg"
-        clinical = result["metadata"]["clinical"]
-        patient = clinical.get("lesion_id", "unknown")
+def build_and_save_lesion_csv(results, output_csv="lesions.csv"):
+    rows = []
+    start = time.time()
 
-        benign_malignant = clinical.get("benign_malignant")
-        diagnosis_1 = clinical.get("diagnosis_1", "")
+    for result in results:
+        try:
+            isic_id = result["isic_id"]
+            filename = f"{isic_id}.jpg"
+            clinical = result["metadata"]["clinical"]
+            patient = clinical.get("lesion_id", "unknown")
 
-        if benign_malignant:
-            label = 1 if benign_malignant.lower() == "malignant" else 0
-        elif diagnosis_1 == "Benign":
-            label = 0
-        elif diagnosis_1 == "Malignant":
-            label = 1
-        else:  # Indeterminate or unknown
-            continue
+            benign_malignant = clinical.get("benign_malignant")
+            diagnosis_1 = clinical.get("diagnosis_1", "")
 
-        rows.append({
-            "file": filename,
-            "patient": patient,
-            "label": label
-        })
+            if benign_malignant:
+                label = 1 if benign_malignant.lower() == "malignant" else 0
+            elif diagnosis_1 == "Benign":
+                label = 0
+            elif diagnosis_1 == "Malignant":
+                label = 1
+            else:
+                continue  # Skip entries without a valid label
 
-    except Exception as e:
-        print(f"Skipped entry {result.get('isic_id', 'UNKNOWN')} due to error: {e}")
+            rows.append({
+                "file": filename,
+                "patient": patient,
+                "label": label
+            })
 
-# Create DataFrame and write to CSV
-df = pd.DataFrame(rows)
-df.to_csv("lesions.csv", index=False)
+        except Exception as e:
+            print(f"Skipped entry {result.get('isic_id', 'UNKNOWN')} due to error: {e}")
 
-elapsed = time.time() - start
-print(f"Took {elapsed:.1f} seconds")
+    df = pd.DataFrame(rows)
+    df.to_csv(output_csv, index=False)
 
-print("Saved lesions.csv with", len(df), "entries.")
+    elapsed = time.time() - start
+    print(f"Took {elapsed:.1f} seconds")
+    print(f"Saved {output_csv} with {len(df)} entries.")
+
+    return df
+
 
 """### Excluding HAM10000 Dataset (Deprecated)
 
@@ -315,57 +286,57 @@ for mid in sorted(missing_ids):
 We randomly assign 70 % of patients to training and split the remaining 30 % equally into validation and test sets, filter the DataFrame accordingly, save each subset to CSV, and confirm sample counts and an overall 81 %/19 % benign/malignant distribution.
 """
 
-df = pd.read_csv("lesions.csv")
+def split_and_prepare_lesion_data(csv_path="lesions.csv"):
+    df = pd.read_csv(csv_path)
+    unique_patients = df["patient"].unique()
 
-unique_patients = df["patient"].unique()
+    train_patients, temp_patients = train_test_split(unique_patients, test_size=0.30, random_state=42)
+    val_patients, test_patients   = train_test_split(temp_patients, test_size=0.50, random_state=42)
 
-train_patients, temp_patients = train_test_split(
-    unique_patients, test_size=0.30, random_state=42
-)
+    train_df = df[df["patient"].isin(train_patients)].reset_index(drop=True)
+    val_df   = df[df["patient"].isin(val_patients)].reset_index(drop=True)
+    test_df  = df[df["patient"].isin(test_patients)].reset_index(drop=True)
 
-# Split temp → 50/50 into val and test (15% each)
-val_patients, test_patients = train_test_split(
-    temp_patients, test_size=0.50, random_state=42
-)
+    # Save to CSV
+    train_df.to_csv("lesions_train.csv", index=False)
+    val_df.to_csv("lesions_val.csv", index=False)
+    test_df.to_csv("lesions_test.csv", index=False)
 
-# Create splits by filtering on patient ID
-train_df = df[df["patient"].isin(train_patients)].reset_index(drop=True)
-val_df = df[df["patient"].isin(val_patients)].reset_index(drop=True)
-test_df = df[df["patient"].isin(test_patients)].reset_index(drop=True)
+    # Print counts
+    print(f"Train: {len(train_df)} samples")
+    print(f"Val:   {len(val_df)} samples")
+    print(f"Test:  {len(test_df)} samples")
 
-train_df.to_csv("lesions_train.csv", index=False)
-val_df.to_csv("lesions_val.csv", index=False)
-test_df.to_csv("lesions_test.csv", index=False)
+    label_counts = df["label"].value_counts(normalize=True) * 100
+    print("Overall dataset class distribution:")
+    print(f"  Benign    (0): {label_counts.get(0, 0):.2f}%")
+    print(f"  Malignant (1): {label_counts.get(1, 0):.2f}%")
 
-print(f"Train: {len(train_df)} samples")
-print(f"Val:   {len(val_df)} samples")
-print(f"Test:  {len(test_df)} samples")
+    # Transforms
+    train_transform = transforms.Compose([
+        transforms.RandomResizedCrop(224, scale=(0.9, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomVerticalFlip(),
+        transforms.RandomRotation(15),
+        transforms.ColorJitter(0.1, 0.1, 0.1),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5]*3, [0.5]*3)
+    ])
 
-label_counts = df["label"].value_counts(normalize=True) * 100
-print(f"Overall dataset class distribution:")
-print(f"  Benign  (0): {label_counts.get(0, 0):.2f}%")
-print(f"  Malignant (1): {label_counts.get(1, 0):.2f}%")
+    val_transform = transforms.Compose([
+        transforms.CenterCrop(224),
+        transforms.Resize(224),
+        transforms.ToTensor(),
+        transforms.Normalize([0.5]*3, [0.5]*3)
+    ])
 
-"""Augmentation and pre-processing"""
-
-train_transform = transforms.Compose([
-    transforms.RandomResizedCrop(224, scale=(0.9, 1.0)),
-    transforms.RandomHorizontalFlip(),
-    transforms.RandomVerticalFlip(),
-    transforms.RandomRotation(15),
-    transforms.ColorJitter(0.1, 0.1, 0.1),
-    transforms.ToTensor(),
-    transforms.Normalize([0.5,0.5,0.5], [0.5,0.5,0.5])
-
-])
-
-val_transform = transforms.Compose([
-    transforms.CenterCrop(224),
-    transforms.Resize(224),
-    transforms.ToTensor(),
-    transforms.Normalize([0.5,0.5,0.5],
-                         [0.5,0.5,0.5])
-])
+    return {
+        "train_df": train_df,
+        "val_df": val_df,
+        "test_df": test_df,
+        "train_transform": train_transform,
+        "val_transform": val_transform
+    }
 
 """This custom `SkinCancerDataset` class wraps our image DataFrame for PyTorch:
 
@@ -374,8 +345,6 @@ val_transform = transforms.Compose([
 - **`transform`**: A `torchvision.transforms.Compose` object for preprocessing and (optionally) augmentations.  
 - **`return_filename`**: If `True`, `__getitem__` returns `(image, label, filename)`, useful for logging .
 """
-
-from torch.utils.data import Dataset
 
 class SkinCancerDataset(Dataset):
     def __init__(self, dataframe, image_dir, transform=None, return_filename=False):
@@ -402,17 +371,57 @@ class SkinCancerDataset(Dataset):
 
 """Wrap `SkinCancerDataset` in a PyTorch `DataLoader`"""
 
-from torch.utils.data import DataLoader
+def create_dataloader(dataset_class, dataframe, image_dir, transform, batch_size=32, shuffle=True, num_workers=2):
+    start = time.time()
 
-start = time.time()
-train_dataset = SkinCancerDataset(train_df, PATH, transform=train_transform)
+    dataset = dataset_class(dataframe, image_dir, transform=transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers)
 
-train_loader = DataLoader(
-    train_dataset,
-    batch_size=32,
-    shuffle=True,
-    num_workers=2
-)
+    elapsed = time.time() - start
+    print(f"Took {elapsed:.1f} seconds to create DataLoader")
 
-elapsed = time.time() - start
-print(f"Took {elapsed:.1f} seconds")
+    return dataset, dataloader
+
+
+def get_skin_cancer_data(path="ISIC_IMAGES_TASK_3"):
+    # Step 1: Fetch metadata
+    results, all_ids = fetch_isic_metadata()
+    print(results[5])  # Inspect one record
+
+    # Step 2: Verify image dimensions
+    verify_image_dimensions(results)
+
+    # Step 3: Inspect label structure
+    inspect_benign_malignant_labels(results)
+    get_diagnosis1_for_missing_benign_malignant(results)
+
+    # Step 4: Download and extract zip images
+    base_url = "https://github.com/PedroDiz/AP-2025/raw/main/"
+    zip_files = [
+        "ISIC_IMAGES_TASK_3_PART_1.zip",
+        "ISIC_IMAGES_TASK_3_PART_2.zip",
+        "ISIC_IMAGES_TASK_3_PART_3.zip"
+    ]
+    download_and_extract_images(zip_files, base_url, extract_to=path)
+
+    # Step 5: Build lesions.csv from metadata
+    build_and_save_lesion_csv(results, output_csv="lesions.csv")
+
+    # Step 6: Split data and return everything
+    data = split_and_prepare_lesion_data(csv_path="lesions.csv")
+
+    return {
+        "train_df": data["train_df"],
+        "val_df": data["val_df"],
+        "test_df": data["test_df"],
+        "train_transform": data["train_transform"],
+        "val_transform": data["val_transform"],
+        "PATH": path,
+        "dataset_class": SkinCancerDataset
+    }
+
+
+# Expose these for other file
+__all__ = [
+    "get_skin_cancer_data"
+]
