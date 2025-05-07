@@ -543,3 +543,15 @@ label = train_dataset[index][1]
 show_tensor_image(sample)
 print(label)
 """
+
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+import matplotlib.pyplot as plt
+
+# Compute confusion matrix
+cm = confusion_matrix(y_true, y_pred)
+
+# Display confusion matrix
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=["Benign", "Malignant"])
+disp.plot(cmap=plt.cm.Blues, values_format='d')
+plt.title(f"Confusion Matrix — Epoch {epoch+1}")
+plt.show()
