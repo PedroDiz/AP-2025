@@ -118,26 +118,52 @@ else:
 
 """Download the photos into ISIC_IMAGES_TASK_3 folder"""
 
-PATH = "ISIC_IMAGES_TASK_3"
+import os
+import zipfile
+import urllib.request
+import time
 
-# Ensure the target directory exists
+# Start timing
+total_start = time.time()
+
+# Target folder
+PATH = "ISIC_IMAGES_TASK_3"
 os.makedirs(PATH, exist_ok=True)
 
-# List of zip files
+# Base URL for raw GitHub content
+base_url = "https://github.com/PedroDiz/AP-2025/raw/main/"
+
+# List of ZIP file names
 zip_files = [
     "ISIC_IMAGES_TASK_3_PART_1.zip",
     "ISIC_IMAGES_TASK_3_PART_2.zip",
     "ISIC_IMAGES_TASK_3_PART_3.zip"
 ]
 
-# Extract each zip file to the PATH directory
+# Download and extract each ZIP file
 for zip_file in zip_files:
-    if os.path.exists(zip_file):
-        with zipfile.ZipFile(zip_file, 'r') as zip_ref:
-            zip_ref.extractall(PATH)
-        print(f"Extracted {zip_file} to {PATH}")
+    start = time.time()
+
+    zip_path = os.path.join(os.getcwd(), zip_file)
+    url = base_url + zip_file
+
+    # Download if not already present
+    if not os.path.exists(zip_path):
+        print(f"Downloading {zip_file}...")
+        urllib.request.urlretrieve(url, zip_path)
+        print(f"Downloaded {zip_file} in {time.time() - start:.1f} seconds")
     else:
-        print(f"File not found: {zip_file}")
+        print(f"{zip_file} already exists, skipping download")
+
+    # Extract into PATH
+    print(f"Extracting {zip_file}...")
+    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+        zip_ref.extractall(PATH)
+    print(f"Extracted {zip_file} in {time.time() - start:.1f} seconds")
+
+# Total elapsed time
+total_elapsed = time.time() - total_start
+print(f"\nTotal time: {total_elapsed:.1f} seconds")
 
 """
 **Determine how each image is labeled as benign or malignant.**
